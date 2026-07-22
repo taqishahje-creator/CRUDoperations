@@ -4,5 +4,11 @@ app = FastAPI()
 
 @app.get("/")
 async def read_Home():
-    return {"message": "Welcome to the Home Page!"}
+    """ Returining baisc browser information for the home page """
+    return { "name": "Task API",
+        "version": "1.0",
+        "endpoints": ["/tasks"]}
 
+@app.get("/health")
+async def health_check():
+    return {"status": "ok"}
