@@ -1,77 +1,60 @@
 # Import Python's built-in SQLite library
 import sqlite3
 
+db_file = "tasks.db"  # Database file name
 # ---------------------------------------------
 # STEP 1: Connect to the SQLite database
 # ---------------------------------------------
+def connection():
+    
 # If "tasks.db" does not exist, SQLite creates it automatically.
-connection = sqlite3.connect("tasks.db")
-
+    connection = sqlite3.connect(db_file)
+    connection.row_factory = sqlite3.Row  # This allows us to access columns by name.
+    
+    return connection
 # Create a cursor object.
 # The cursor is used to execute SQL commands.
-cursor = connection.cursor()
+    
+    
+    
+def initialize_database():
+    """
+    Creates the database and inserts sample data
+    only the first time the application runs.
+    """
 
-# ---------------------------------------------
-# STEP 2: Create the table (only if it doesn't exist)
-# ---------------------------------------------
-cursor.execute("""
-CREATE TABLE IF NOT EXISTS tasks (
-    id INTEGER PRIMARY KEY AUTOINCREMENT,
-    title TEXT NOT NULL,
-    done BOOLEAN NOT NULL
-)
-""")
+    connection = sqlite3.connect(db_file)
+    cursor = connection.cursor()
 
-# ---------------------------------------------
-# STEP 3: Check whether the table already contains data
-# ---------------------------------------------
-cursor.execute("SELECT COUNT(*) FROM tasks")
+    cursor.execute("""
+        CREATE TABLE IF NOT EXISTS tasks(
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            title TEXT NOT NULL,
+            done BOOLEAN NOT NULL
+        )
+    """)
 
-# fetchone() returns a tuple like (0,) or (5,)
-# [0] extracts the actual number.
-task_count = cursor.fetchone()[0]
+    cursor.execute("SELECT COUNT(*) FROM tasks")
+    count = cursor.fetchone()[0]
 
-# ---------------------------------------------
-# STEP 4: Insert sample data ONLY if the table is empty
-# ---------------------------------------------
-if task_count == 0:
+    if count == 0:
 
-    sample_tasks = [
-        ("Buy groceries", False),
-        ("Complete assignment", True),
-        ("Exercise for 30 minutes", False)
-    ]
+        sample_tasks = [
+            ("Buy groceries", False),
+            ("Complete assignment", True),
+            ("Exercise for 30 minutes", False)
+        ]
 
-    cursor.executemany(
-        "INSERT INTO tasks (title, done) VALUES (?, ?)",
-        sample_tasks
-    )
+        cursor.executemany(
+            "INSERT INTO tasks(title, done) VALUES (?, ?)",
+            sample_tasks
+        )
 
-    print("Sample tasks inserted.")
+        print("Sample tasks inserted.")
 
-else:
-    print("Database already contains tasks. Skipping insertion.")
+    else:
 
-# ---------------------------------------------
-# STEP 5: Display all tasks
-# ---------------------------------------------
-cursor.execute("SELECT * FROM tasks")
+        print("Database already contains tasks.")
 
-tasks = cursor.fetchall()
-
-print("\nCurrent Tasks")
-
-for task in tasks:
-    print(task)
-
-# ---------------------------------------------
-# STEP 6: Save changes permanently
-# ---------------------------------------------
-connection.commit()
-
-# ---------------------------------------------
-# STEP 7: Close the database connection
-# ---------------------------------------------
-connection.close()
-
-print("\nDatabase setup completed successfully.")
+    connection.commit()
+    connection.close()
