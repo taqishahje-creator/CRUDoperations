@@ -1,12 +1,12 @@
 from fastapi import FastAPI, HTTPException, Response
-
+from pydantic import BaseModel
+from typing import Optional
 from database import connection, initialize_database
-
 # =====================================================
 # Pydantic Models
 # =====================================================
-
-
+class TaskCreate(BaseModel):
+    title: Optional[str] = None
 
 # =====================================================
 # FastAPI Application
@@ -117,3 +117,48 @@ async def get_task(task_id: int):
 # =====================================================
 # Create New Task
 # =====================================================
+
+
+
+@newapp.post("/tasks", status_code=201)
+async def create_task(task: TaskCreate):
+    """
+    Creates a new task.
+    """
+
+    # Missing title
+    if task.title is None:
+        raise HTTPException(
+            status_code=400,
+            detail={"error": "Title is required"}
+        )
+
+    title = task.title.strip()
+
+    # Empty title
+    if title == "":
+        raise HTTPException(
+            status_code=400,
+            detail={"error": "Title cannot be empty"}
+        )
+
+    connect = connection()
+    
+    cursor = connect.cursor()
+    
+    cursor.execute(
+        "INSERT INTO tasks(title, done) VALUES (?, ?)",
+        (title, False)
+    )
+    
+    connect.commit()
+    
+    task_id = cursor.lastrowid
+    
+    connect.close()
+
+    return {
+        "id": task_id,
+        "title": title,
+        "done": False
+    }
