@@ -230,3 +230,24 @@ async def update_task(task_id: int, task: TasksUpdate):
 # Delete task by id
 #=====================================================
 
+@newapp.delete("/tasks/{task_id}", summary="Delete Task by ID")
+async def delete_task(task_id: int):
+    """ 
+    Deletes a task by its ID.
+    """
+    connect = connection()
+    cursor = connect.cursor()
+    
+    existing = cursor.execute("SELECT * FROM tasks WHERE id = ?", (task_id,)).fetchone()
+    if not existing:
+        connect.close()
+        raise HTTPException(status_code=404, detail=f"Task {task_id} not found")
+    
+    cursor.execute("DELETE FROM tasks WHERE id = ?", (task_id,))
+    connect.commit()
+    
+    connect.close()
+    
+    return Response(status_code=204)
+
+
