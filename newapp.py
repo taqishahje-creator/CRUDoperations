@@ -5,8 +5,16 @@ from database import connection, initialize_database
 # =====================================================
 # Pydantic Models
 # =====================================================
+#Creating a Pydantic model for task creation. This model will be used to validate the incoming request data when creating a new task.
 class TaskCreate(BaseModel):
     title: Optional[str] = None
+
+#Creating a Pydantic model for task updates. This model will be used to validate the incoming request data when updating an existing task.
+class TasksUpdate(BaseModel):
+    id: Optional[int] = None
+    title: Optional[str] = None
+    done: Optional[bool] = None
+    
 
 # =====================================================
 # FastAPI Application
@@ -162,3 +170,63 @@ async def create_task(task: TaskCreate):
         "title": title,
         "done": False
     }
+    
+#=======================================
+#update task by id
+#=======================================
+
+@newapp.put("/tasks/{task_id}", summary = "Update task by id")
+async def update_task(task_id: int, task: TasksUpdate):
+    """
+    Update a task by its id
+    """
+    if task.title is None and task.done is None:
+        raise HTTPException(
+            status_code=400,
+            detail={"error": "At least one field (title or done) must be provided for update"}
+        )
+
+    # Ensure if body contains id it matches path id
+    if task.id is not None and task.id != task_id:
+        raise HTTPException(
+            status_code=400,
+            detail={"error": "Task ID in the path does not match the ID in the request body"}
+        )
+
+    connect = connection()
+    cursor = connect.cursor()
+
+    cursor.execute("SELECT * FROM tasks WHERE id = ?", (task_id,))
+    existing = cursor.fetchone()
+    if not existing:
+        connect.close()
+        raise HTTPException(status_code=404, detail=f"Task {task_id} not found")
+
+    fields = []
+    params = []
+    if task.title is not None:
+        title = task.title.strip()
+        if title == "":
+            connect.close()
+            raise HTTPException(status_code=400, detail={"error": "Title cannot be empty"})
+        fields.append("title = ?")
+        params.append(title)
+    if task.done is not None:
+        fields.append("done = ?")
+        params.append(int(bool(task.done)))
+
+    params.append(task_id)
+    cursor.execute(f"UPDATE tasks SET {', '.join(fields)} WHERE id = ?", tuple(params))
+    connect.commit()
+
+    cursor.execute("SELECT * FROM tasks WHERE id = ?", (task_id,))
+    row = cursor.fetchone()
+    connect.close()
+
+    return {"id": row["id"], "title": row["title"], "done": bool(row["done"]) }
+
+
+#=====================================================
+# Delete task by id
+#=====================================================
+
