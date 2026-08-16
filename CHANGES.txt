@@ -1,0 +1,121 @@
+WHAT I DID — CrudAPI / A3ModifiedApp PostgreSQL Fix
+=====================================================
+Date: 2026-08-16
+
+PROBLEMS FOUND
+--------------
+
+1. init.sql was EMPTY
+   - The file that Docker uses to initialize the PostgreSQL database on first
+     startup had no content.
+   - Result: the 'tasks' table never got created inside the container, so every
+     API call failed with "relation tasks does not exist".
+
+2. dockorfile/dockor_compose.yml was EMPTY
+   - The Docker Compose file for spinning up the PostgreSQL container was blank.
+   - Result: there was no automated way to start the database correctly.
+
+3. A3ModifiedApp.py used SQLite syntax instead of PostgreSQL syntax
+   a) SQL placeholders — SQLite uses '?' but PostgreSQL (psycopg) requires '%s'.
+      Every single SQL query in the file used '?', which caused psycopg to crash.
+
+   b) Getting the new row ID after INSERT — SQLite uses cursor.lastrowid.
+      PostgreSQL has no lastrowid; the correct approach is to add
+      'RETURNING id' to the INSERT statement and call cursor.fetchone().
+
+   c) Chained cursor.execute().fetchone() in delete_task — psycopg does not
+      support chaining these calls; they must be separate statements.
+
+   d) 'done' field cast to int(bool(...)) for UPDATE — PostgreSQL BOOLEAN columns
+      accept Python True/False directly; the int() wrapper is not needed and can
+      cause type errors.
+
+4. requirements.txt was missing key packages
+   - psycopg (PostgreSQL driver) was not listed.
+   - python-dotenv (for loading .env) was not listed.
+   - httpx, pytest, pytest-asyncio (needed for testing) were not listed.
+
+5. No test file existed for A3ModifiedApp
+   - There were no tests to verify the app worked with PostgreSQL.
+
+
+FIXES APPLIED
+-------------
+
+File: init.sql
+  - Written from scratch.
+  - Creates the 'tasks' table with the correct PostgreSQL schema
+    (GENERATED ALWAYS AS IDENTITY primary key, TEXT, BOOLEAN).
+  - Seeds 3 sample rows only if the table is empty (idempotent).
+  - Docker mounts this file at /docker-entrypoint-initdb.d/ so it runs
+    automatically when the container starts for the first time.
+
+File: dockorfile/dockor_compose.yml
+  - Written from scratch.
+  - Defines the 'db' service using postgres:17 image.
+  - Sets POSTGRES_USER=postgres, POSTGRES_PASSWORD=dev, POSTGRES_DB=tasks
+    (matching the DATABASE_URL in .env).
+  - Maps host port 5433 → container port 5432.
+  - Mounts ../init.sql into the Docker entrypoint init directory.
+  - Adds a healthcheck so other services can wait for the DB to be ready.
+  - Uses a named volume (taskdb_data) so data survives container restarts.
+
+File: A3ModifiedApp.py  (5 targeted fixes)
+  Fix 1 — get_task():
+    Changed "WHERE id = ?" to "WHERE id = %s"
+
+  Fix 2 — create_task():
+    Changed "VALUES (?, ?)" to "VALUES (%s, %s) RETURNING id"
+    Replaced cursor.lastrowid with cursor.fetchone()["id"]
+    Moved connect.commit() to after the RETURNING fetch
+
+  Fix 3 — update_task() SELECT:
+    Changed "WHERE id = ?" to "WHERE id = %s"
+
+  Fix 4 — update_task() field placeholders:
+    Changed "title = ?" to "title = %s"
+    Changed "done = ?"  to "done = %s"
+    Changed "WHERE id = ?" to "WHERE id = %s" (in both UPDATE and re-SELECT)
+    Changed int(bool(task.done)) to bool(task.done)
+
+  Fix 5 — delete_task():
+    Split chained cursor.execute(...).fetchone() into two separate calls
+    Changed all "WHERE id = ?" to "WHERE id = %s"
+
+File: database.py
+  - Fixed KeyError: 0 in initialize_database().
+  - With psycopg's dict_row factory active, SELECT COUNT(*) returns a dict
+    like {"count": 3}, not a positional tuple. Accessing row[0] raised a
+    KeyError. Fixed by adding an explicit alias: SELECT COUNT(*) AS count
+    and accessing row["count"] instead.
+  Added: psycopg[binary], python-dotenv, httpx, pytest, pytest-asyncio
+
+File: test_A3ModifiedApp.py  (NEW)
+  Created a full pytest test suite with 20 tests covering:
+    - GET  /           (root info)
+    - GET  /health     (health check)
+    - GET  /tasks      (list all, field validation)
+    - POST /tasks      (create, empty title, missing title)
+    - GET  /tasks/{id} (found, not found)
+    - PUT  /tasks/{id} (update title, update done, empty body,
+                        mismatched id, not found, empty title)
+    - DELETE /tasks/{id} (204 response, actually removes, not found)
+
+
+HOW TO RUN
+----------
+
+1. Start (or restart) the PostgreSQL container so init.sql is picked up:
+
+   cd f:\flyrank\week2\crudapi\dockorfile
+   docker compose -f dockor_compose.yml down -v    # remove old volume
+   docker compose -f dockor_compose.yml up -d      # fresh start
+
+2. Run the tests:
+
+   cd f:\flyrank\week2\crudapi
+   venv\Scripts\pytest test_A3ModifiedApp.py -v
+
+3. (Optional) Start the API manually:
+
+   venv\Scripts\uvicorn A3ModifiedApp:app --reload --port 8000

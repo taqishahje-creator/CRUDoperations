@@ -1,11 +1,6 @@
 from fastapi import FastAPI, HTTPException, Response
 from database import connection, initialize_database
 from models import TaskCreate, TasksUpdate
-# =====================================================
-# Pydantic Models
-# =====================================================
-
-    
 
 # =====================================================
 # FastAPI Application
@@ -18,9 +13,10 @@ app = FastAPI(
 )
 
 # =====================================================
-# SQLite Database
+# PostgreSQL Database Initialization
 # =====================================================
 initialize_database()  # Initialize the database and insert sample data if needed.
+
 # =====================================================
 # Root Endpoint
 # =====================================================
@@ -30,7 +26,6 @@ async def read_home():
     """
     Returns basic information about the API.
     """
-
     return {
         "name": "Task API",
         "version": "1.0",
@@ -47,7 +42,6 @@ async def health_check():
     """
     Checks whether the API is running.
     """
-
     return {
         "status": "ok"
     }
@@ -62,20 +56,15 @@ async def get_all_tasks():
     """
     Returns the complete list of tasks.
     """
-    
-    connect =  connection()
-
+    connect = connection()
     cursor = connect.cursor()
-
     cursor.execute("SELECT * FROM tasks")
-
-   
-    row =  cursor.fetchall()
+    row = cursor.fetchall()
     connect.close()
-    tasks = []
 
+    tasks = []
     tasks.extend(
-        {"id": r["id"], "title": r["title"], "done": bool(r["done"])}
+        {"id": r[0], "title": r[1], "done": bool(r[2])}
         for r in row
     )
     return tasks
@@ -91,20 +80,16 @@ async def get_task(task_id: int):
     Returns a single task using its ID.
     """
     connect = connection()
-    
     cursor = connect.cursor()
-    
-    cursor.execute("SELECT * FROM tasks WHERE id = ?", (task_id,))
-    
+    cursor.execute("SELECT * FROM tasks WHERE id = %s", (task_id,))
     row = cursor.fetchone()
-    
     connect.close()
 
     if row:
         return {
-            "id": row["id"],
-            "title": row["title"],
-            "done": bool(row["done"])
+            "id": row[0],
+            "title": row[1],
+            "done": bool(row[2])
         }
 
     raise HTTPException(
@@ -117,14 +102,11 @@ async def get_task(task_id: int):
 # Create New Task
 # =====================================================
 
-
-
 @app.post("/tasks", status_code=201)
 async def create_task(task: TaskCreate):
     """
     Creates a new task.
     """
-
     # Missing title
     if task.title is None:
         raise HTTPException(
@@ -142,18 +124,26 @@ async def create_task(task: TaskCreate):
         )
 
     connect = connection()
-    
     cursor = connect.cursor()
-    
+
+    # RETURNING id is required for PostgreSQL — no lastrowid in psycopg
     cursor.execute(
-        "INSERT INTO tasks(title, done) VALUES (?, ?)",
+        "INSERT INTO tasks(title, done) VALUES (%s, %s) RETURNING id",
         (title, False)
     )
-    
+
+    row = cursor.fetchone()
+    if row is None:
+        connect.rollback()
+        connect.close()
+        raise HTTPException(
+            status_code=500,
+            detail={"error": "Task could not be created"}
+        )
+
+    task_id = row[0]
+
     connect.commit()
-    
-    task_id = cursor.lastrowid
-    
     connect.close()
 
     return {
@@ -161,12 +151,13 @@ async def create_task(task: TaskCreate):
         "title": title,
         "done": False
     }
-    
-#=======================================
-#update task by id
-#=======================================
 
-@app.put("/tasks/{task_id}", summary = "Update task by id")
+
+# =====================================================
+# Update Task by ID
+# =====================================================
+
+@app.put("/tasks/{task_id}", summary="Update task by id")
 async def update_task(task_id: int, task: TasksUpdate):
     """
     Update a task by its id
@@ -187,7 +178,7 @@ async def update_task(task_id: int, task: TasksUpdate):
     connect = connection()
     cursor = connect.cursor()
 
-    cursor.execute("SELECT * FROM tasks WHERE id = ?", (task_id,))
+    cursor.execute("SELECT * FROM tasks WHERE id = %s", (task_id,))
     existing = cursor.fetchone()
     if not existing:
         connect.close()
@@ -200,45 +191,46 @@ async def update_task(task_id: int, task: TasksUpdate):
         if title == "":
             connect.close()
             raise HTTPException(status_code=400, detail={"error": "Title cannot be empty"})
-        fields.append("title = ?")
+        fields.append("title = %s")
         params.append(title)
     if task.done is not None:
-        fields.append("done = ?")
-        params.append(int(bool(task.done)))
+        fields.append("done = %s")
+        params.append(bool(task.done))
 
     params.append(task_id)
-    cursor.execute(f"UPDATE tasks SET {', '.join(fields)} WHERE id = ?", tuple(params))
+    cursor.execute(f"UPDATE tasks SET {', '.join(fields)} WHERE id = %s", tuple(params))
     connect.commit()
 
-    cursor.execute("SELECT * FROM tasks WHERE id = ?", (task_id,))
+    cursor.execute("SELECT * FROM tasks WHERE id = %s", (task_id,))
     row = cursor.fetchone()
     connect.close()
 
-    return {"id": row["id"], "title": row["title"], "done": bool(row["done"]) }
+    if row is None:
+        raise HTTPException(status_code=404, detail=f"Task {task_id} not found")
+
+    return {"id": row[0], "title": row[1], "done": bool(row[2])}
 
 
-#=====================================================
-# Delete task by id
-#=====================================================
+# =====================================================
+# Delete Task by ID
+# =====================================================
 
 @app.delete("/tasks/{task_id}", summary="Delete Task by ID")
 async def delete_task(task_id: int):
-    """ 
+    """
     Deletes a task by its ID.
     """
     connect = connection()
     cursor = connect.cursor()
-    
-    existing = cursor.execute("SELECT * FROM tasks WHERE id = ?", (task_id,)).fetchone()
+
+    cursor.execute("SELECT * FROM tasks WHERE id = %s", (task_id,))
+    existing = cursor.fetchone()
     if not existing:
         connect.close()
         raise HTTPException(status_code=404, detail=f"Task {task_id} not found")
-    
-    cursor.execute("DELETE FROM tasks WHERE id = ?", (task_id,))
+
+    cursor.execute("DELETE FROM tasks WHERE id = %s", (task_id,))
     connect.commit()
-    
     connect.close()
-    
+
     return Response(status_code=204)
-
-

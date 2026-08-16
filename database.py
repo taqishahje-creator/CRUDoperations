@@ -1,60 +1,100 @@
-# Import Python's built-in SQLite library
-import sqlite3
+import os
 
-db_file = "tasks.db"  # Database file name
+import psycopg
+import psycopg.rows
+from dotenv import load_dotenv
+
+
+# Load variables from .env
+load_dotenv(override=True)
+
+
+# Get DATABASE_URL from environment variables
+db_url = os.getenv("DATABASE_URL")
+
+if not db_url:
+    raise ValueError("DATABASE_URL environment variable is not set.")
+
+
 # ---------------------------------------------
-# STEP 1: Connect to the SQLite database
+# STEP 1: Connect to the PostgreSQL database
 # ---------------------------------------------
-def connection():
-    
-# If "tasks.db" does not exist, SQLite creates it automatically.
-    connection = sqlite3.connect(db_file)
-    connection.row_factory = sqlite3.Row  # This allows us to access columns by name.
-    
-    return connection
-# Create a cursor object.
-# The cursor is used to execute SQL commands.
-    
-    
-    
-def initialize_database():
+def connection() -> psycopg.Connection:
     """
-    Creates the database and inserts sample data
-    only the first time the application runs.
+    Creates and returns a connection to PostgreSQL.
     """
 
-    connection = sqlite3.connect(db_file)
-    cursor = connection.cursor()
+    conn = psycopg.connect(str(db_url))
 
-    cursor.execute("""
-        CREATE TABLE IF NOT EXISTS tasks(
-            id INTEGER PRIMARY KEY AUTOINCREMENT,
-            title TEXT NOT NULL,
-            done BOOLEAN NOT NULL
-        )
-    """)
+    # Allows rows to be accessed using column names
+    conn.row_factory = psycopg.rows.dict_row
 
-    cursor.execute("SELECT COUNT(*) FROM tasks")
-    count = cursor.fetchone()[0]
+    return conn
 
-    if count == 0:
 
-        sample_tasks = [
-            ("Buy groceries", False),
-            ("Complete assignment", True),
-            ("Exercise for 30 minutes", False)
-        ]
+# ---------------------------------------------
+# STEP 2: Initialize the database
+# ---------------------------------------------
+def initialize_database() -> None:
+    """
+    Creates the tasks table if it doesn't exist
+    and inserts sample data if the table is empty.
+    """
 
-        cursor.executemany(
-            "INSERT INTO tasks(title, done) VALUES (?, ?)",
-            sample_tasks
-        )
+    conn = connection()
 
-        print("Sample tasks inserted.")
+    try:
+        cursor = conn.cursor()
 
-    else:
+        # Create table
+        cursor.execute("""
+            CREATE TABLE IF NOT EXISTS tasks (
+                id INTEGER GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
+                title TEXT NOT NULL,
+                done BOOLEAN NOT NULL
+            )
+        """)
 
-        print("Database already contains tasks.")
+        # Check whether tasks already exist
+        cursor.execute("SELECT COUNT(*) AS count FROM tasks")
 
-    connection.commit()
-    connection.close()
+        row = cursor.fetchone()
+
+        if isinstance(row, dict):
+            count = row.get("count", 0)
+        else:
+            count = row[0] if row is not None else 0
+
+        # Insert sample data only if table is empty
+        if count == 0:
+
+            sample_tasks = [
+                ("Buy groceries", False),
+                ("Complete assignment", True),
+                ("Exercise for 30 minutes", False)
+            ]
+
+            cursor.executemany(
+                """
+                INSERT INTO tasks (title, done)
+                VALUES (%s, %s)
+                """,
+                sample_tasks
+            )
+
+            print("Sample tasks inserted.")
+
+        else:
+            print("Database already contains tasks.")
+
+        # Save changes
+        conn.commit()
+
+    except Exception:
+        # Undo changes if something goes wrong
+        conn.rollback()
+        raise
+
+    finally:
+        # Always close the connection
+        conn.close()
