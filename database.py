@@ -27,7 +27,7 @@ def connection() -> psycopg.Connection:
     conn = psycopg.connect(str(db_url))
 
     # Allows rows to be accessed using column names
-    conn.row_factory = psycopg.rows.dict_row
+    conn.row_factory = psycopg.rows.dict_row # type: ignore
 
     return conn
 
