@@ -268,6 +268,135 @@ http://127.0.0.1:8000/docs
 
 On the first run, the application automatically creates the SQLite database and initializes it with sample data if the database is empty.
 
+
+# Assignment 3 Variant with Postgres SQL on Docker Setup
+
+A Task CRUD API built with FastAPI, backed by a PostgreSQL database running in Docker. This is the third storage swap in the FlyRank Backend Track series — memory (A1) → SQLite (A2) → containerized Postgres (this one). The API surface is identical across all three; only the storage engine underneath changes.
+
+## What this is
+
+A simple task management REST API supporting full CRUD (Create, Read, Update, Delete) operations, with tasks persisted in a PostgreSQL database running inside a Docker container. Configuration (database credentials) is kept out of source control via environment variables.
+
+## Tech stack
+
+- **Language:** Python 3 (FastAPI)
+- **Database:** PostgreSQL 17 (Docker container)
+- **Driver:** psycopg 3
+- **Config:** python-dotenv (`.env`)
+
+## Prerequisites
+
+- Docker Desktop (or Podman) installed and running
+- Python 3.10+
+- pip
+
+## Setup — one command to run everything
+
+```bash
+# 1. Clone the repo
+git clone <your-repo-url>
+cd <your-repo-folder>
+
+# 2. Copy the example env file and adjust if needed
+cp .env.example .env
+
+# 3. Create a virtual environment and install dependencies
+python -m venv venv
+venv\Scripts\activate        # Windows
+# source venv/bin/activate   # macOS/Linux
+pip install -r requirements.txt
+
+# 4. Start Postgres in Docker
+docker run --name taskdb -e POSTGRES_PASSWORD=dev -e POSTGRES_DB=tasks \
+  -p 5432:5432 -v taskdata:/var/lib/postgresql/data -d postgres:17
+
+# 5. Run the API
+uvicorn A3ModifiedApp:app --reload
+```
+
+The API will be available at `http://localhost:8000`, and the interactive docs at `http://localhost:8000/docs`.
+
+## Environment variables
+
+Set in `.env` (git-ignored). See `.env.example` for the required keys.
+
+| Variable | Description | Example |
+|---|---|---|
+| `DATABASE_URL` | Postgres connection string | `postgresql://postgres:dev@localhost:5432/tasks` |
+
+> Note: if port `5432` is already in use on your machine (e.g. by a native Postgres install), map the container to a different host port such as `5433` and update `DATABASE_URL` accordingly.
+
+## Database
+
+On startup, the app automatically:
+- Connects to Postgres using `DATABASE_URL`
+- Creates the `tasks` table if it doesn't already exist
+- Seeds three example tasks, but only if the table is empty (won't duplicate on restart)
+
+**Schema:**
+
+| Column | Type | Notes |
+|---|---|---|
+| `id` | `SERIAL PRIMARY KEY` | Auto-incrementing |
+| `title` | `TEXT NOT NULL` | Task title |
+| `done` | `BOOLEAN NOT NULL` | Completion status |
+
+## Endpoints
+
+| Method | Path | Description | Success | Error |
+|---|---|---|---|---|
+| GET | `/` | API info | 200 | — |
+| GET | `/health` | Health check | 200 | — |
+| GET | `/tasks` | List all tasks | 200 | — |
+| GET | `/tasks/{id}` | Get a single task | 200 | 404 if not found |
+| POST | `/tasks` | Create a task | 201 | 400 if title missing/empty |
+| PUT | `/tasks/{id}` | Update a task | 200 | 400 invalid body, 404 if not found |
+| DELETE | `/tasks/{id}` | Delete a task | 204 | 404 if not found |
+
+## Example request
+
+```bash
+curl -i http://localhost:8000/tasks
+```
+
+```
+HTTP/1.1 200 OK
+content-type: application/json
+
+[
+  {"id": 1, "title": "Buy groceries", "done": false},
+  {"id": 2, "title": "Complete assignment", "done": true},
+  {"id": 3, "title": "Exercise for 30 minutes", "done": false}
+]
+```
+
+## Verifying data in the database
+
+```bash
+docker exec -it taskdb psql -U postgres -d tasks -c "\dt"
+docker exec -it taskdb psql -U postgres -d tasks -c "SELECT * FROM tasks;"
+```
+
+**Screenshot:**
+
+*(insert screenshot of `\dt` and `SELECT * FROM tasks;` output here)*
+
+## Notes on the storage swap
+
+The routes and request/response shapes are unchanged from A1 (in-memory) and A2 (SQLite). Only the `database.py` module — the single place all database logic lives — changed to talk to Postgres instead of SQLite. This is the point of keeping storage logic isolated from route logic: swapping the underlying engine three times required touching only one file each time, proving storage really is "just an implementation detail" behind a stable API.
+
+## Project structure
+
+```
+.
+├── A3ModifiedApp.py    # FastAPI app and routes
+├── database.py         # All database connection/query logic
+├── models.py           # Pydantic request models
+├── .env.example         # Template for required environment variables
+├── .gitignore
+└── README.md
+```
+
 ## Author
 
 Taqi Shah
